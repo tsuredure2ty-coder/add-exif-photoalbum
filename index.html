@@ -166,6 +166,12 @@
       border: 1px solid #f5c6cb;
     }
     
+    .message.info {
+      background: #d1ecf1;
+      color: #0c5460;
+      border: 1px solid #bee5eb;
+    }
+    
     .loading {
       display: none;
       text-align: center;
@@ -192,6 +198,25 @@
       font-size: 14px;
       margin-top: 10px;
     }
+    
+    .format-badge {
+      display: inline-block;
+      padding: 5px 10px;
+      border-radius: 5px;
+      font-size: 12px;
+      font-weight: bold;
+      margin-top: 10px;
+    }
+    
+    .format-badge.heic {
+      background: #ffeaa7;
+      color: #d63031;
+    }
+    
+    .format-badge.jpeg {
+      background: #d4edda;
+      color: #155724;
+    }
   </style>
 </head>
 <body>
@@ -201,8 +226,8 @@
     <div class="upload-area" id="uploadArea">
       <div class="upload-icon">📷</div>
       <div class="upload-text">クリックまたはドラッグ&ドロップで写真を選択</div>
-      <div class="file-size">（大きな画像も自動で最適化されます）</div>
-      <input type="file" id="fileInput" accept="image/*">
+      <div class="file-size">（HEIC・JPEG対応 / 大きな画像も自動で最適化されます）</div>
+      <input type="file" id="fileInput" accept="image/*,.heic,.heif">
     </div>
     
     <div class="preview-container" id="previewContainer">
@@ -219,20 +244,22 @@
     
     <div class="loading" id="loading">
       <div class="spinner"></div>
-      <div>アップロード中...</div>
+      <div id="loadingText">処理中...</div>
     </div>
     
     <div class="message" id="message"></div>
   </div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/exif-js/2.3.0/exif.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
   
   <script>
     // ⚠️ ここにあなたのCloudflare WorkerのURLを設定してください
-    const WORKER_URL = 'https://add-exif-photoalbum.tsuredure2ty.workers.dev/';
+    const WORKER_URL = 'https://your-worker.your-subdomain.workers.dev';
     
     let selectedFile = null;
     let exifData = {};
+    let convertedFile = null;
     
     const uploadArea = document.getElementById('uploadArea');
     const fileInput = document.getElementById('fileInput');
@@ -243,6 +270,7 @@
     const uploadBtn = document.getElementById('uploadBtn');
     const resetBtn = document.getElementById('resetBtn');
     const loading = document.getElementById('loading');
+    const loadingText = document.getElementById('loadingText');
     const message = document.getElementById('message');
     
     // クリックでファイル選択
@@ -283,18 +311,70 @@
       if (!file) return;
       
       selectedFile = file;
+      convertedFile = null;
       
-      // プレビュー表示
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        previewImage.src = e.target.result;
-        previewContainer.style.display = 'block';
-        uploadArea.style.display = 'none';
-      };
-      reader.readAsDataURL(file);
+      loading.style.display = 'block';
+      loadingText.textContent = 'ファイルを処理中...';
+      uploadArea.style.display = 'none';
+      message.style.display = 'none';
       
-      // EXIF情報取得
-      await extractExifData(file);
+      try {
+        // HEICファイルの場合は変換
+        if (isHEIC(file)) {
+          showMessage('info', '🔄 HEIC形式を検出しました。JPEGに変換中...');
+          loadingText.textContent = 'HEICをJPEGに変換中...';
+          convertedFile = await convertHEICtoJPEG(file);
+          showMessage('success', '✅ JPEGに変換しました！');
+        } else {
+          convertedFile = file;
+        }
+        
+        // プレビュー表示
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          previewImage.src = e.target.result;
+          previewContainer.style.display = 'block';
+          loading.style.display = 'none';
+        };
+        reader.readAsDataURL(convertedFile);
+        
+        // EXIF情報取得
+        await extractExifData(convertedFile);
+        
+      } catch (error) {
+        console.error('File processing error:', error);
+        showMessage('error', `ファイル処理エラー: ${error.message}`);
+        loading.style.display = 'none';
+        uploadArea.style.display = 'block';
+      }
+    }
+    
+    function isHEIC(file) {
+      const name = file.name.toLowerCase();
+      return name.endsWith('.heic') || name.endsWith('.heif') || file.type === 'image/heic' || file.type === 'image/heif';
+    }
+    
+    async function convertHEICtoJPEG(file) {
+      try {
+        const convertedBlob = await heic2any({
+          blob: file,
+          toType: 'image/jpeg',
+          quality: 0.9
+        });
+        
+        // Blobが配列で返される場合があるので対応
+        const blob = Array.isArray(convertedBlob) ? convertedBlob[0] : convertedBlob;
+        
+        // 元のファイル名を維持（拡張子をjpgに変更）
+        const newFileName = file.name.replace(/\.(heic|heif)$/i, '.jpg');
+        
+        return new File([blob], newFileName, {
+          type: 'image/jpeg',
+          lastModified: Date.now()
+        });
+      } catch (error) {
+        throw new Error('HEIC変換に失敗しました: ' + error.message);
+      }
     }
     
     async function extractExifData(file) {
@@ -316,6 +396,8 @@
           
           if (make && model) {
             exifData.camera = `${make} ${model}`.trim();
+          } else if (model) {
+            exifData.camera = model;
           }
           
           if (lens) {
@@ -414,15 +496,18 @@
     }
     
     async function uploadToNotion() {
-      if (!selectedFile) return;
+      if (!convertedFile) return;
       
       uploadBtn.disabled = true;
       loading.style.display = 'block';
+      loadingText.textContent = '画像を圧縮中...';
       message.style.display = 'none';
       
       try {
         // 画像を4MB〜4.8MBに圧縮
-        const compressedFile = await compressImage(selectedFile, 4.8);
+        const compressedFile = await compressImage(convertedFile, 4.8);
+        
+        loadingText.textContent = 'Notionにアップロード中...';
         
         // FormDataを作成
         const formData = new FormData();
@@ -479,6 +564,7 @@
                     type: 'image/jpeg',
                     lastModified: Date.now()
                   });
+                  console.log(`圧縮完了: ${(blob.size / 1024 / 1024).toFixed(2)}MB (品質: ${Math.round(quality * 100)}%)`);
                   resolve(compressedFile);
                 } else {
                   quality -= 0.1;
@@ -505,6 +591,7 @@
     
     function resetForm() {
       selectedFile = null;
+      convertedFile = null;
       exifData = {};
       fileInput.value = '';
       previewContainer.style.display = 'none';
