@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>📸 写真アップロード to Notion</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans JP', sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      padding: 20px;
+    }
+    
+    .container {
+      background: white;
+      border-radius: 20px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+      padding: 40px;
+      max-width: 600px;
+      width: 100%;
+    }
+    
+    h1 {
+      text-align: center;
+      color: #333;
+      margin-bottom: 30px;
+      font-size: 28px;
+    }
+    
+    .upload-area {
+      border: 3px dashed #667eea;
+      border-radius: 15px;
+      padding: 40px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.3s;
+      background: #f8f9ff;
+    }
+    
+    .upload-area:hover {
+      border-color: #764ba2;
+      background: #f0f2ff;
+    }
+    
+    .upload-area.dragover {
+      border-color: #764ba2;
+      background: #e8ebff;
+    }
+    
+    .upload-icon {
+      font-size: 64px;
+      margin-bottom: 20px;
+    }
+    
+    .upload-text {
+      color: #666;
+      font-size: 16px;
+      margin-bottom: 10px;
+    }
+    
+    input[type="file"] {
+      display: none;
+    }
+    
+    .preview-container {
+      margin-top: 30px;
+      display: none;
+    }
+    
+    .preview-image {
+      width: 100%;
+      border-radius: 10px;
+      margin-bottom: 20px;
+    }
+    
+    .exif-info {
+      background: #f8f9ff;
+      border-radius: 10px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+    
+    .exif-item {
+      display: flex;
+      justify-content: space-between;
+      padding: 8px 0;
+      border-bottom: 1px solid #e0e0e0;
+    }
+    
+    .exif-item:last-child {
+      border-bottom: none;
+    }
+    
+    .exif-label {
+      font-weight: bold;
+      color: #667eea;
+    }
+    
+    .exif-value {
+      color: #333;
+    }
+    
+    .btn {
+      width: 100%;
+      padding: 15px;
+      border: none;
+      border-radius: 10px;
+      font-size: 16px;
+      font-weight: bold;
+      cursor: pointer;
+      transition: all 0.3s;
+      margin-bottom: 10px;
+    }
+    
+    .btn-primary {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+    }
+    
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
+    }
+    
+    .btn-primary:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+    
+    .btn-secondary {
+      background: #f0f0f0;
+      color: #333;
+    }
+    
+    .btn-secondary:hover {
+      background: #e0e0e0;
+    }
+    
+    .message {
+      padding: 15px;
+      border-radius: 10px;
+      margin-top: 20px;
+      display: none;
+    }
+    
+    .message.success {
+      background: #d4edda;
+      color: #155724;
+      border: 1px solid #c3e6cb;
+    }
+    
+    .message.error {
+      background: #f8d7da;
+      color: #721c24;
+      border: 1px solid #f5c6cb;
+    }
+    
+    .loading {
+      display: none;
+      text-align: center;
+      padding: 20px;
+    }
+    
+    .spinner {
+      border: 4px solid #f3f3f3;
+      border-top: 4px solid #667eea;
+      border-radius: 50%;
+      width: 50px;
+      height: 50px;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 15px;
+    }
+    
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    
+    .file-size {
+      color: #999;
+      font-size: 14px;
+      margin-top: 10px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>📸 写真アップロード to Notion</h1>
+    
+    <div class="upload-area" id="uploadArea">
+      <div class="upload-icon">📷</div>
+      <div class="upload-text">クリックまたはドラッグ&ドロップで写真を選択</div>
+      <div class="file-size">（大きな画像も自動で最適化されます）</div>
+      <input type="file" id="fileInput" accept="image/*">
+    </div>
+    
+    <div class="preview-container" id="previewContainer">
+      <img class="preview-image" id="previewImage" alt="プレビュー">
+      
+      <div class="exif-info" id="exifInfo">
+        <h3 style="margin-bottom: 15px; color: #333;">📋 EXIF情報</h3>
+        <div id="exifData"></div>
+      </div>
+      
+      <button class="btn btn-primary" id="uploadBtn">Notionにアップロード</button>
+      <button class="btn btn-secondary" id="resetBtn">別の写真を選択</button>
+    </div>
+    
+    <div class="loading" id="loading">
+      <div class="spinner"></div>
+      <div>アップロード中...</div>
+    </div>
+    
+    <div class="message" id="message"></div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/exif-js/2.3.0/exif.min.js"></script>
+  
+  <script>
+    // ⚠️ ここにあなたのCloudflare WorkerのURLを設定してください
+    const WORKER_URL = 'https://add-exif-photoalbum.tsuredure2ty.workers.dev/';
+    
+    let selectedFile = null;
+    let exifData = {};
+    
+    const uploadArea = document.getElementById('uploadArea');
+    const fileInput = document.getElementById('fileInput');
+    const previewContainer = document.getElementById('previewContainer');
+    const previewImage = document.getElementById('previewImage');
+    const exifInfo = document.getElementById('exifInfo');
+    const exifDataEl = document.getElementById('exifData');
+    const uploadBtn = document.getElementById('uploadBtn');
+    const resetBtn = document.getElementById('resetBtn');
+    const loading = document.getElementById('loading');
+    const message = document.getElementById('message');
+    
+    // クリックでファイル選択
+    uploadArea.addEventListener('click', () => fileInput.click());
+    
+    // ファイル選択時
+    fileInput.addEventListener('change', handleFileSelect);
+    
+    // ドラッグ&ドロップ
+    uploadArea.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      uploadArea.classList.add('dragover');
+    });
+    
+    uploadArea.addEventListener('dragleave', () => {
+      uploadArea.classList.remove('dragover');
+    });
+    
+    uploadArea.addEventListener('drop', (e) => {
+      e.preventDefault();
+      uploadArea.classList.remove('dragover');
+      
+      const files = e.dataTransfer.files;
+      if (files.length > 0) {
+        fileInput.files = files;
+        handleFileSelect();
+      }
+    });
+    
+    // リセットボタン
+    resetBtn.addEventListener('click', resetForm);
+    
+    // アップロードボタン
+    uploadBtn.addEventListener('click', uploadToNotion);
+    
+    async function handleFileSelect() {
+      const file = fileInput.files[0];
+      if (!file) return;
+      
+      selectedFile = file;
+      
+      // プレビュー表示
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        previewImage.src = e.target.result;
+        previewContainer.style.display = 'block';
+        uploadArea.style.display = 'none';
+      };
+      reader.readAsDataURL(file);
+      
+      // EXIF情報取得
+      await extractExifData(file);
+    }
+    
+    async function extractExifData(file) {
+      return new Promise((resolve) => {
+        EXIF.getData(file, function() {
+          const make = EXIF.getTag(this, 'Make');
+          const model = EXIF.getTag(this, 'Model');
+          const lens = EXIF.getTag(this, 'LensModel');
+          const datetime = EXIF.getTag(this, 'DateTime');
+          const focalLength = EXIF.getTag(this, 'FocalLength');
+          const fNumber = EXIF.getTag(this, 'FNumber');
+          const iso = EXIF.getTag(this, 'ISOSpeedRatings');
+          const exposureTime = EXIF.getTag(this, 'ExposureTime');
+          const lat = EXIF.getTag(this, 'GPSLatitude');
+          const lon = EXIF.getTag(this, 'GPSLongitude');
+          
+          // EXIF情報を整形
+          exifData = {};
+          
+          if (make && model) {
+            exifData.camera = `${make} ${model}`.trim();
+          }
+          
+          if (lens) {
+            exifData.lens = lens;
+          }
+          
+          if (datetime) {
+            exifData.datetime = datetime;
+            // ISO 8601形式に変換
+            const parts = datetime.split(' ');
+            if (parts.length === 2) {
+              const date = parts[0].replace(/:/g, '-');
+              const time = parts[1];
+              exifData.datetimeISO = `${date}T${time}`;
+            }
+          }
+          
+          if (focalLength) {
+            exifData.focalLength = `${focalLength}mm`;
+          }
+          
+          if (fNumber) {
+            exifData.fNumber = `f/${fNumber}`;
+          }
+          
+          if (iso) {
+            exifData.iso = `ISO ${iso}`;
+          }
+          
+          if (exposureTime) {
+            if (exposureTime < 1) {
+              exifData.shutterSpeed = `1/${Math.round(1/exposureTime)}s`;
+            } else {
+              exifData.shutterSpeed = `${exposureTime}s`;
+            }
+          }
+          
+          if (lat && lon) {
+            const latRef = EXIF.getTag(this, 'GPSLatitudeRef');
+            const lonRef = EXIF.getTag(this, 'GPSLongitudeRef');
+            const latDec = convertDMSToDD(lat, latRef);
+            const lonDec = convertDMSToDD(lon, lonRef);
+            exifData.location = `${latDec.toFixed(6)}, ${lonDec.toFixed(6)}`;
+          }
+          
+          displayExifData();
+          resolve();
+        });
+      });
+    }
+    
+    function convertDMSToDD(dms, ref) {
+      const degrees = dms[0];
+      const minutes = dms[1];
+      const seconds = dms[2];
+      
+      let dd = degrees + minutes/60 + seconds/3600;
+      
+      if (ref === 'S' || ref === 'W') {
+        dd = dd * -1;
+      }
+      
+      return dd;
+    }
+    
+    function displayExifData() {
+      let html = '';
+      
+      const labels = {
+        camera: 'カメラ',
+        lens: 'レンズ',
+        datetime: '撮影日時',
+        focalLength: '焦点距離',
+        fNumber: 'F値',
+        iso: 'ISO感度',
+        shutterSpeed: 'シャッター速度',
+        location: '位置情報'
+      };
+      
+      for (const [key, value] of Object.entries(exifData)) {
+        if (key !== 'datetimeISO' && value) {
+          html += `
+            <div class="exif-item">
+              <span class="exif-label">${labels[key]}</span>
+              <span class="exif-value">${value}</span>
+            </div>
+          `;
+        }
+      }
+      
+      if (html === '') {
+        html = '<div style="color: #999;">EXIF情報が見つかりませんでした</div>';
+      }
+      
+      exifDataEl.innerHTML = html;
+    }
+    
+    async function uploadToNotion() {
+      if (!selectedFile) return;
+      
+      uploadBtn.disabled = true;
+      loading.style.display = 'block';
+      message.style.display = 'none';
+      
+      try {
+        // 画像を4MB〜4.8MBに圧縮
+        const compressedFile = await compressImage(selectedFile, 4.8);
+        
+        // FormDataを作成
+        const formData = new FormData();
+        formData.append('photo', compressedFile);
+        formData.append('exifData', JSON.stringify(exifData));
+        
+        // Cloudflare Workerにアップロード
+        const response = await fetch(WORKER_URL, {
+          method: 'POST',
+          body: formData
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+          showMessage('success', result.message);
+          setTimeout(() => {
+            resetForm();
+          }, 2000);
+        } else {
+          showMessage('error', `エラー: ${result.error}`);
+        }
+        
+      } catch (error) {
+        showMessage('error', `アップロードエラー: ${error.message}`);
+      } finally {
+        uploadBtn.disabled = false;
+        loading.style.display = 'none';
+      }
+    }
+    
+    async function compressImage(file, targetSizeMB) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const img = new Image();
+          img.onload = () => {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            
+            // 元の画像サイズを維持
+            canvas.width = img.width;
+            canvas.height = img.height;
+            ctx.drawImage(img, 0, 0);
+            
+            // 品質を調整して圧縮
+            let quality = 0.9;
+            const targetBytes = targetSizeMB * 1024 * 1024;
+            
+            const compress = () => {
+              canvas.toBlob((blob) => {
+                if (blob.size <= targetBytes || quality <= 0.1) {
+                  const compressedFile = new File([blob], file.name, {
+                    type: 'image/jpeg',
+                    lastModified: Date.now()
+                  });
+                  resolve(compressedFile);
+                } else {
+                  quality -= 0.1;
+                  compress();
+                }
+              }, 'image/jpeg', quality);
+            };
+            
+            compress();
+          };
+          img.onerror = reject;
+          img.src = e.target.result;
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+    }
+    
+    function showMessage(type, text) {
+      message.className = `message ${type}`;
+      message.textContent = text;
+      message.style.display = 'block';
+    }
+    
+    function resetForm() {
+      selectedFile = null;
+      exifData = {};
+      fileInput.value = '';
+      previewContainer.style.display = 'none';
+      uploadArea.style.display = 'block';
+      message.style.display = 'none';
+    }
+  </script>
+</body>
+</html>
