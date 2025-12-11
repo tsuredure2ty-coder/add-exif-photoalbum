@@ -251,11 +251,12 @@
   </div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/exif-js/2.3.0/exif.min.js"></script>
+  <!-- heic2any は動的ロードにも対応させるが、先にCDNを置いておく -->
   <script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
   
   <script>
     // ⚠️ ここにあなたのCloudflare WorkerのURLを設定してください
-    const WORKER_URL = 'https://your-worker.your-subdomain.workers.dev';
+    const WORKER_URL = 'https://add-exif-photoalbum.tsuredure2ty.workers.dev/';
     
     let selectedFile = null;
     let exifData = {};
@@ -354,8 +355,50 @@
       return name.endsWith('.heic') || name.endsWith('.heif') || file.type === 'image/heic' || file.type === 'image/heif';
     }
     
+    let heic2anyLoading = null;
+    
+    // heic2any が読み込めていないケースをフォローするローダー
+    async function ensureHeic2AnyLoaded() {
+      if (typeof window.heic2any === 'function') return;
+      if (heic2anyLoading) return heic2anyLoading;
+      
+      heic2anyLoading = new Promise((resolve, reject) => {
+        const tryFallback = () => {
+          const fallback = document.createElement('script');
+          fallback.src = 'https://unpkg.com/heic2any/dist/heic2any.min.js';
+          fallback.async = true;
+          fallback.onload = () => {
+            if (typeof window.heic2any === 'function') {
+              resolve();
+            } else {
+              reject(new Error('heic2anyの読み込みに失敗しました（fallback）'));
+            }
+          };
+          fallback.onerror = () => reject(new Error('heic2anyの読み込みに失敗しました（fallback）'));
+          document.head.appendChild(fallback);
+        };
+        
+        const script = document.createElement('script');
+        script.src = 'https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js';
+        script.async = true;
+        script.onload = () => {
+          if (typeof window.heic2any === 'function') {
+            resolve();
+          } else {
+            tryFallback();
+          }
+        };
+        script.onerror = tryFallback;
+        document.head.appendChild(script);
+      });
+      
+      return heic2anyLoading;
+    }
+    
     async function convertHEICtoJPEG(file) {
       try {
+        await ensureHeic2AnyLoaded();
+        
         const convertedBlob = await heic2any({
           blob: file,
           toType: 'image/jpeg',
