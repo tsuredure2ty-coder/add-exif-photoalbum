@@ -251,12 +251,13 @@
   </div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/exif-js/2.3.0/exif.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/exifr/dist/full.umd.js"></script>
   <!-- heic2any は動的ロードにも対応させるが、先にCDNを置いておく -->
   <script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
   
   <script>
     // ⚠️ ここにあなたのCloudflare WorkerのURLを設定してください
-    const WORKER_URL = 'https://add-exif-photoalbum.tsuredure2ty.workers.dev/';
+    const WORKER_URL = 'https://add-exif-photoalbum.tsuredure2ty.workers.dev';
     
     let selectedFile = null;
     let exifData = {};
@@ -320,6 +321,9 @@
       message.style.display = 'none';
       
       try {
+        // 先にEXIFを抽出（HEICはここでメタデータを拾っておく）
+        await extractExifData(file);
+
         // HEICファイルの場合は変換
         if (isHEIC(file)) {
           showMessage('info', '🔄 HEIC形式を検出しました。JPEGに変換中...');
@@ -338,9 +342,6 @@
           loading.style.display = 'none';
         };
         reader.readAsDataURL(convertedFile);
-        
-        // EXIF情報取得
-        await extractExifData(convertedFile);
         
       } catch (error) {
         console.error('File processing error:', error);
@@ -421,6 +422,66 @@
     }
     
     async function extractExifData(file) {
+      // HEICは exifr で読む（EXIF保持のため）。JPEGは従来の exif-js。
+      if (isHEIC(file)) {
+        try {
+          const meta = await exifr.parse(file, { gps: true });
+          exifData = {};
+          
+          const make = meta?.Make;
+          const model = meta?.Model;
+          const lens = meta?.LensModel;
+          const datetime = meta?.DateTimeOriginal || meta?.CreateDate || meta?.ModifyDate;
+          const focalLength = meta?.FocalLength;
+          const fNumber = meta?.FNumber;
+          const iso = meta?.ISO;
+          const exposureTime = meta?.ExposureTime;
+          const lat = meta?.latitude ?? meta?.GPSLatitude;
+          const lon = meta?.longitude ?? meta?.GPSLongitude;
+          
+          if (make && model) {
+            exifData.camera = `${make} ${model}`.trim();
+          } else if (model) {
+            exifData.camera = model;
+          }
+          if (lens) exifData.lens = lens;
+          
+          if (datetime) {
+            exifData.datetime = datetime;
+            // datetime が Date 型の場合と文字列の場合をフォロー
+            if (datetime instanceof Date) {
+              exifData.datetimeISO = datetime.toISOString();
+            } else if (typeof datetime === 'string') {
+              exifData.datetimeISO = datetime;
+            }
+          }
+          
+          if (focalLength) exifData.focalLength = `${focalLength}mm`;
+          if (fNumber) exifData.fNumber = `f/${fNumber}`;
+          if (iso) exifData.iso = `ISO ${iso}`;
+          
+          if (exposureTime) {
+            if (exposureTime < 1) {
+              exifData.shutterSpeed = `1/${Math.round(1/exposureTime)}s`;
+            } else {
+              exifData.shutterSpeed = `${exposureTime}s`;
+            }
+          }
+          
+          if (lat && lon) {
+            const latDec = Array.isArray(lat) ? convertDMSToDD(lat, meta?.GPSLatitudeRef) : lat;
+            const lonDec = Array.isArray(lon) ? convertDMSToDD(lon, meta?.GPSLongitudeRef) : lon;
+            exifData.location = `${Number(latDec).toFixed(6)}, ${Number(lonDec).toFixed(6)}`;
+          }
+          
+          displayExifData();
+          return;
+        } catch (err) {
+          console.warn('HEIC EXIF read failed, fallback to exif-js (EXIF lost after convert)', err);
+          // 続行して exif-js へフォールバック
+        }
+      }
+      
       return new Promise((resolve) => {
         EXIF.getData(file, function() {
           const make = EXIF.getTag(this, 'Make');
@@ -560,6 +621,8 @@
         // Cloudflare Workerにアップロード
         const response = await fetch(WORKER_URL, {
           method: 'POST',
+          mode: 'cors',
+          redirect: 'follow',
           body: formData
         });
         
